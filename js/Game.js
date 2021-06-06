@@ -4,11 +4,15 @@ Game = function (
 				game,
 				config,
 				indexElements,
-				gameFormat
+				gameMode
 				) {
 	
 	
-	this.gameObj = new game(config, indexElements, gameFormat)
+	this.gameObj = new game(config, indexElements, gameMode)
 	this.gameObj.initGame()
 	
 }
+
+
+/* 主程序 */
+game = new Game(Sudoku, config, indexElements, gameMode)

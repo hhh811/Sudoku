@@ -1,49 +1,91 @@
 /* 大数独表格对象 */
 function Sudoku(
-					mainFrameConfig,	//数独表所有样式配置信息
-					indexElements,		//页面元素
-					gameFormat
-					){
-	this.mainFrameHeight = mainFrameConfig.mainFrameHeight
-	this.mainFrameWidth = mainFrameConfig.mainFrameWidth
-	this.innerBorderWidth = mainFrameConfig.innerBorderWidth
-	this.outerBorderWidth = mainFrameConfig.outerBorderWidth
-	this.valueTableFontSize = mainFrameConfig.valueTableFontSize
-	this.inputValueFontSize = mainFrameConfig.inputValueFontSize
-	this.unitHeight = this.mainFrameHeight / 9
-	this.unitWidth = this.mainFrameWidth / 9
+				config,	//数独表所有样式配置信息
+				indexElements,		//页面元素
+				gameMode
+				){	
 	
+	// 游戏参数
+	this.hardLevel = 1							//难度等级
+	this.gameMode = gameMode					//游戏模式
+	this.sudokuSize = config.sudokuSize			//数独阶数
+	this.numLine = this.sudokuSize ** 2			//每行，列，块单元数
+	this.numUnits = this.numLine ** 2		//总单元数
+
+	// 页面元素参数
+	this.mainFrameHeight = config.mainFrameHeight
+	this.mainFrameWidth = config.mainFrameWidth
+	this.innerBorderWidth = config.innerBorderWidth
+	this.outerBorderWidth = config.outerBorderWidth
+	this.valueTableFontSize = config.valueTableFontSize
+	this.inputValueFontSize = config.inputValueFontSize
+	this.unitHeight = this.mainFrameHeight / this.numLine
+	this.unitWidth = this.mainFrameWidth / this.numLine
+	this.innerBorderIndex = []	//需要加粗内网格的单元行、列号
 	
-	this.hardLevel = 1				//难度等级
-	this.gameFormat = gameFormat	//游戏模式
+	for (let i=1; i<this.sudokuSize; i++) {
+		this.innerBorderIndex.push(i*this.sudokuSize-1)
+	}	
+
+	// 页面元素
+	this.container = indexElements.container				//页面上存放素有内容的框架
+	this.mainFrame = indexElements.mainFrame				//页面上的游戏框架
+	this.victoryDiv = indexElements.victoryDiv				//页面上的表示胜利的框架
+	this.buttonsFrame = indexElements.buttonsFrame			//页面上放置按钮的区域
+
 	
 	this.victory = false			//游戏胜利判断
 	
 	// 初始化小方格
 	this.units = []					//所有方格div的节点集合
-	for (let i = 0; i < 81; i++){
+	for (let i = 0; i < this.numUnits; i++){
 		let unitDiv = document.createElement("div")
+		this.mainFrame.appendChild(unitDiv)
+		let unitInput = document.createElement("input")
+		unitDiv.appendChild(unitInput)
+		let unitP = document.createElement("p")
+        unitDiv.appendChild(unitP)
+		unitLabel  = document.createElement("p")
+        unitDiv.appendChild(unitLabel)
 		//封装单元格
 		unit = new Unit(this, i, unitDiv, unitInput, unitP)
 		this.units.push(unit)
+	}
 
-	// 初始化视图
-	this.viewer = new SudoViewer(this, indexElements)
-	this.viewer.initMainFrame()
-	
-	//实例化数据模型
-	this.dataModel = new ValuesCountModel(this)
-	
-	//实例化求解器
-	this.solver = new DemoSolver(this, this.dataModel)
-	
+	this.buttonHeight = config.buttonHeight
+	this.buttonWidth = config.buttonWidth
+
+	//控制按钮
+	let prevGameButton = document.createElement("input")
+	this.buttonsFrame.appendChild(prevGameButton)
+	let nextGameButton = document.createElement("input")
+	this.buttonsFrame.appendChild(nextGameButton)
+	this.buttons = {
+		prevGameButton: prevGameButton,
+		nextGameButton: nextGameButton,
+	}
+	this.currentGameText = document.createElement("p")
+	this.buttonsFrame.appendChild(this.currentGameText)
+
 	this.prevClick = -1				//记录上次点击的单元号
+	this.currentClick = -1			//本次点击单元号
 	this.unitClicked = false		//记录本次单击是否单击了单元，用于在单击单元时排除单击整个界面的事件
+	this.activatedUnits = []
+	this.currentGameNumber = 0		//当前存档编号
+	
+	//视图
+	this.viewer = new SudokuViewer(this, indexElements)
+	//数据模型
+	this.dataModel = new ValuesCountModel(this)
+	//求解器
+	this.solver = new DemoSolver(this, this.dataModel)
+	//存档功能
+	this.saver = new SudokuSaver(this)
 	
 	/* 初始化 */
 	this.initGame = function() {
 		this.container.sudoku = this		//给container添加一个指向sudoku的指针，方便被container添加事件
-		this.initMainFrame()
+		this.viewer.initMainFrame()
 		this.initEvents()
 		// this.initProblem(this.hardLevel)
 	}
@@ -54,16 +96,74 @@ function Sudoku(
 		for (let unit of this.units){
 			unit.unitDiv.addEventListener("click", 
 			() => {
-				this.unitClick(unit.index)
-			}, true)
+				if (!unit.locked) {
+				this.currentClick = unit.index
+				}
+			}, false)
 		}
-		
 		/* 设置整个页面container即表格外点击事件 */		
 		this.container.addEventListener("click", 
 			() => {
-				this.refresh()
-				this.updateUnitsColor()
-				}, true)
+				this.updateUnitsInputNumber()
+				this.deactivateAndActivate()
+				this.viewer.render()
+				// 清空当前点击单元记录
+				this.prevClick = this.currentClick
+				this.currentClick = -1
+				}, false)
+		//按钮事件
+		this.buttons.nextGameButton.addEventListener("click",
+			() => {
+				this.saver.nextGame()
+				}, false)
+		this.buttons.prevGameButton.addEventListener("click",
+		() => {
+			this.saver.prevGame()
+			}, false)
+	}
+
+	// 向单元中填入数字
+	this.updateUnitInputNumber = function(index, inputValue) {
+		let unit = this.units[index]
+		if(inputValue <=this.numLine && inputValue >= 1){
+			unit.unitInput.value = inputValue
+		}
+		else {
+			unit.unitInput.value = ""
+			inputValue = -1
+		}
+		// 更新数据模型，检查冲突
+		let oldValue = unit.inputValue
+		unit.inputValue = inputValue
+		this.dataModel.updateUnitData(this.prevClick, oldValue)
+	}
+
+	// 更新单元格数字
+	this.updateUnitsInputNumber = function() {
+		if (this.prevClick < 0) {
+			return
+		}
+		// 检查输入数字有效性
+		let unit = this.units[this.prevClick]
+		let inputValue = unit.unitInput.value
+		this.updateUnitInputNumber(this.prevClick, inputValue)
+	}
+
+	// 激活点击单元及相关单元 清空上次激活的单元
+	this.deactivateAndActivate = function() {
+		for (let index of this.activatedUnits) {
+			this.units[index].activated = false
+		}
+		this.activatedUnits = []
+		if (this.currentClick >= 0) {
+			//获取相关单元列表
+			let [ , , ids] = this.getRelatedUnitsId(this.currentClick)
+			this.activatedUnits = ids
+			//激活本次点击的相关单元
+			for (let index of this.activatedUnits) {
+				this.units[index].activated = true
+			}
+		}
 	}
 
 	
@@ -77,31 +177,31 @@ function Sudoku(
 		let colUnitsId = []
 		let blkUnitsId = []
 		//同行
-		let irow = Math.floor(index/9)	//行号
-		for (i=0; i<9; i++){
-			let num = irow * 9 + i
+		let irow = Math.floor(index/this.numLine)	//行号
+		for (i=0; i<this.numLine; i++){
+			let num = irow * this.numLine + i
 			if (num != index) {
 				ids.push(num)
 				rowUnitsId.push(num)
 			}
 		}
 		//同列
-		let icol = index % 9			//列号
-		for (i=0; i<9; i++){
-			let num = i*9+icol
+		let icol = index % this.numLine			//列号
+		for (i=0; i<this.numLine; i++){
+			let num = i*this.numLine+icol
 			if (num != index) {
 				ids.push(num)
 				colUnitsId.push(num)
 			}
 		}
 		//同块
-		let brow = Math.floor(irow/3)	//块行号
-		let bcol = Math.floor(icol/3)	//块列号
-		for (i=0; i<3; i++){
-			for (j=0; j<3; j++){
-				let krow = brow*3+i
-				let kcol = bcol*3+j
-				let num = krow*9 + kcol
+		let brow = Math.floor(irow/this.sudokuSize)	//块行号
+		let bcol = Math.floor(icol/this.sudokuSize)	//块列号
+		for (i=0; i<this.sudokuSize; i++){
+			for (j=0; j<this.sudokuSize; j++){
+				let krow = brow*this.sudokuSize+i
+				let kcol = bcol*this.sudokuSize+j
+				let num = krow*this.numLine + kcol
 				if (!(krow == irow || kcol == icol) || blkRepeated){
 					ids.push(num)
 					blkUnitsId.push(num)
@@ -109,133 +209,17 @@ function Sudoku(
 			}
 		}
 		
-		let iblk = brow * 3 + bcol
+		let iblk = brow * this.sudokuSize + bcol
 		return [[irow, icol, iblk], [rowUnitsId, colUnitsId, blkUnitsId], ids]
 		
 	}
-	
-	// 激活相关小方格
-	this.activateUnits = function(ids){		
-		for(let unit of this.units){
-			if (ids.indexOf(unit.index) != -1){
-				unit.activate()
-			} 
-		}
-	}
-	
-	//更新所有单元颜色
-	this.updateUnitsColor = function () {
-		for(let unit of this.units) {
-			unit.checkColor()
-		}
-	}
-	
-	
-	// 单元点击事件
-	this.unitClick = function(index){
-		
-		this.refresh()
-		let unit = this.units[index]
-		
-		//获取相关单元列表
-		let [ , , ids] = this.getRelatedUnitsId(index)
-		
-		//激活本次点击的相关单元
-		this.activateUnits(ids)
 
-		//本次单击单元激活input
-		if (!unit.locked) {
-			unit.unitInput.style.visibility = "visible"
-			unit.unitP.style.visibility = "hidden"
-		}
-
-		//更新所有单元颜色
-		this.updateUnitsColor()
-		//检查胜利条件
-		// this.checkVictory()
-		this.prevClick = index
-		
-		this.unitClicked = true
-	}
-	
-	//每次点击的刷新事件，也用于点击页面其他地方
-	this.refresh = function () {
-		//取消激活所有单元
-		for (unit of this.units) {
-			unit.deactivate()
-		}
-		
-		let unitPrev = this.units[this.prevClick]
-		//上次单击的单元更新P的数字，隐藏input，显示p
-		if(unitPrev) {
-			let updateOk = false
-			if (!unitPrev.locked){
-				unitPrev.update()
-				unitPrev.unitInput.style.visibility = "hidden"
-				unitPrev.unitP.style.visibility = "visible"
-			}
-			if (this.gameFormat == "TEST") {
-				//相关单元也要更新
-				let [ , , ids] = this.getRelatedUnitsId(unitPrev.index)
-				this.updateUnits(ids)
-			} else if (this.gameFormat == "SOLVE") {
-				this.updateUnits()
-			}
-		} else {
-			//更新所有单元
-			this.updateUnits()
-		}
-	}
-	
-	
-	//对指定的数个单元进行更新
-	this.updateUnits = function (ids) {
-		//输入参数为指定单元号的列表
-		//若输入为空，则更新所有单元
-		let unitsToUpdate = []
-		if (!ids) {
-			unitsToUpdate = this.units
-		} else {
-			for (id of ids) {
-				unitsToUpdate.push(this.units[id])
-			}
-		}
-		
-		for (unit of unitsToUpdate) {
-			unit.update()
-		}
-	}
 	
 	//出题
 	this.initProblem = function (
 								hardLevel		//难度等级
 								)
 	{
-		let givenUnitsCount = [30 , 15, 10][hardLevel - 1]	//根据难度等级，给出单元格数字的数量
-		let generateModel = this.dataModel					//出题用检查冲突模型			！！！！！！！！！！
-		let givenIds = []									//给出数字的单元号
-		
-		//选取givenUnitsCount个单元号，注意不要重复
-		for (let i = 0; i < givenUnitsCount; i++) {
-			let newId
-			do {
-				newId = Math.floor(Math.random() * this.units.length)
-			} while (givenIds.indexOf(newId) != -1)
-			givenIds.push(newId)
-		}
-		
-		//锁住单元，生成数字，调用生成dataModel的相关方法
-		for (let id of givenIds) {
-			let unit = this.units[id]
-			let givenValue = generateModel.generateUnitValue(id)
-			unit.update(givenValue)
-			unit.lock()
-		}
-		
-		//更新所有单元
-		this.refresh()
-		this.updateUnitsColor()
-		
 	}
 	
 	
@@ -256,5 +240,5 @@ function Sudoku(
 			this.victoryDiv.innerHTML = "Victory"
 		}
 	}
-	
+
 }
